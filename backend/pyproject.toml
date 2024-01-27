@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "movielens-chatrec-app"
+version = "0.1.0"
+description = ""
+authors = ["ingeniom22 <jamesmichael0444@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+langserve = {extras = ["server"], version = "^0.0.39"}
+tensorflow = "^2.12"
+LibRecommender = "^1.4.0"
+torch = "^2.1.2"
+pandas = "^2.2.0"
+scikit-learn = "^1.4.0"
+passlib = "^1.7.4"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+python-multipart = "^0.0.6"
+openai = "^1.10.0"
+pydantic = "1.10.13"
+python-dotenv = "^1.0.1"
+sqlmodel = "^0.0.14"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,45 +1,38 @@
 import json
 from typing import Annotated, Any, Dict, Optional
-from langserve import add_routes
 
 import tensorflow as tf
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from langchain.agents import AgentExecutor
 from langchain.agents.format_scratchpad import format_to_openai_function_messages
 from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.tools import StructuredTool
-from langchain.tools.render import format_tool_to_openai_function
-from langchain_core.runnables import (
-    Runnable,
-    ConfigurableField,
-    RunnableSerializable,
-    RunnableConfig,
-)
-
-from libreco.algorithms import DeepFM
-from libreco.data import DataInfo
-from sqlmodel import Session
-from .models import Input, Output, RecSysInput, User
-from .database import engine
-from .router import auth
-from .router.auth import get_current_active_user, get_current_active_user_from_request
 
 # from .router.auth import per_req_config_modifier
 from langchain.schema.runnable import RunnablePassthrough
+from langchain.tools import StructuredTool
+from langchain.tools.render import format_tool_to_openai_function
+from langchain_core.runnables import (
+    ConfigurableField,
+    Runnable,
+    RunnableConfig,
+    RunnableSerializable,
+)
+from langserve import add_routes
+from libreco.algorithms import DeepFM
+from libreco.data import DataInfo
+from sqlmodel import Session
 
-from fastapi.middleware.cors import CORSMiddleware
+from .database import engine
+from .models import Input, Output, RecSysInput, User
+from .router import auth
+from .router.auth import get_current_active_user, get_current_active_user_from_request
 
 # Load konfigurasi dari file .env
 load_dotenv()
-
-
-# hanya untuk prototype
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 MODEL_PATH = "recsys_models/movielens_model"
 MODEL_NAME = "movielens_deepfm_model"
