@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 const AuthContext = createContext();
 
 const AuthProvider = ({ children }) => {
+    const apiUrl = import.meta.env.VITE_API_URL;
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(localStorage.getItem("site") || "");
     const navigate = useNavigate();
@@ -14,7 +15,7 @@ const AuthProvider = ({ children }) => {
                 .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(formData[key]))
                 .join('&');
 
-            const response = await fetch("http://localhost:8000/token", {
+            const response = await fetch(apiUrl+"/token", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
@@ -27,7 +28,7 @@ const AuthProvider = ({ children }) => {
                 localStorage.setItem("site", res.access_token);
                 setToken(res.access_token);
 
-                const userResponse = await fetch("http://localhost:8000/users/me/", {
+                const userResponse = await fetch(apiUrl+"/users/me/", {
                     method: "GET",
                     headers: {
                         "Content-Type": "application/json",
@@ -39,10 +40,10 @@ const AuthProvider = ({ children }) => {
                     const userData = await userResponse.json();
                     setUser(userData);
 
-                    navigate("/chat");
+                    navigate("/");
                     return;
                 } else {
-                    // Handle the case where the user request was not successful
+                    alert("Wrong username or password")
                     console.error("User request failed:", userResponse.statusText);
                 }
             }

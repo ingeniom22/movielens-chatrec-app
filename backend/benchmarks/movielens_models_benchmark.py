@@ -130,6 +130,8 @@ deepfm.save(
     path=MODEL_PATH, model_name="movielens_deepfm_model", manual=True, inference_only=True
 )
 
+deepfm.recommend_user(user=896, k=10)
+
 data_info.save(path=MODEL_PATH, model_name="movielens_deepfm_model")
 
 reset_state("GraphSage")

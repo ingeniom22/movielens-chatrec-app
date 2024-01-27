@@ -4,17 +4,21 @@ import { useNavigate } from "react-router-dom";
 
 const Chat = () => {
     const apiUrl = import.meta.env.VITE_API_URL;
-    
+
     const auth = useAuth();
     const navigate = useNavigate();
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(false);
 
+    const [chatHistory, setChatHistory] = useState([]);
+    const [inputText, setInputText] = useState("");
+    const [role, setRole] = useState("");
+
 
     useEffect(() => {
         const fetchUser = async () => {
             try {
-                const userResponse = await fetch(apiUrl+"/users/me/", {
+                const userResponse = await fetch(apiUrl + "/users/me/", {
                     method: "GET",
                     headers: {
                         "Content-Type": "application/json",
@@ -39,14 +43,22 @@ const Chat = () => {
 
 
 
-    const [chatHistory, setChatHistory] = useState([]);
-    const [inputText, setInputText] = useState("");
-    const [role, setRole] = useState("");
+
 
     const handleSubmitMessage = async () => {
         try {
             setLoading(true);
-            const response = await fetch("http://localhost:8000/invoke", {
+
+            const newHumanMessage = {
+                "content": inputText,
+                "additional_kwargs": {},
+                "type": "human",
+                "example": false
+            };
+
+            setChatHistory(prevChatHistory => [...prevChatHistory, newHumanMessage]);
+
+            const response = await fetch(apiUrl + "/invoke", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -63,12 +75,6 @@ const Chat = () => {
 
             const result = await response.json();
 
-            const newHumanMessage = {
-                "content": inputText,
-                "additional_kwargs": {},
-                "type": "human",
-                "example": false
-            };
 
             const newAIMessage = {
                 "content": result.output.output,
@@ -77,7 +83,7 @@ const Chat = () => {
                 "example": false
             };
 
-            setChatHistory([...chatHistory, newHumanMessage, newAIMessage]);
+            setChatHistory(prevChatHistory => [...prevChatHistory, newAIMessage]);
 
             // Clear the input field
             setInputText("");
@@ -99,8 +105,8 @@ const Chat = () => {
     };
 
     return (
-        <div className="container mx-auto p-8">
-            <div className="bg-white rounded shadow p-8">
+        <div className="container mx-auto p-8 flex flex-col justify-between h-48">
+            <div className="bg-white rounded shadow p-8 mb-8">
                 <div className="flex justify-between items-center mb-4">
                     <h1 className="text-2xl font-bold">Welcome, {user?.full_name}!</h1>
                     <button onClick={() => auth.logOut()} className="p-2 btn-submit bg-blue-500 rounded-lg text-white">
@@ -128,7 +134,7 @@ const Chat = () => {
                             key={index}
                             className={`flex mb-2 ${message.type === 'ai' ? 'justify-start' : 'justify-end'}`}
                         >
-                            <div className={'bg-gray-200 p-2 rounded'}>
+                            <div className={'bg-gray-200 p-2 rounded max-w-lg'}>
                                 <p className="text-gray-800 font-bold">
                                     {message.type === 'ai' ? 'ChatRec' : 'Human'}
                                 </p>
@@ -138,15 +144,14 @@ const Chat = () => {
                     ))}
                 </div>
 
-
-                <form>
+                <form className="mt-8 mb-8 fixed inset-x-0 bottom-0 left-0 w-full">
                     <label htmlFor="chat" className="sr-only">
                         Your message
                     </label>
                     <div className="flex items-center px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700">
                         <textarea
                             id="chat"
-                            value={inputText}
+                            value={loading ? "" : inputText}
                             onChange={handleInputChange}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
@@ -189,7 +194,6 @@ const Chat = () => {
                                 type="button"
                                 className="inline-flex justify-center p-2 text-blue-600 rounded-full cursor-pointer hover:bg-blue-100 dark:text-blue-500 dark:hover:bg-gray-600"
                             >
-                                {/* Your original button content */}
                                 <svg
                                     className="w-5 h-5 rotate-90 rtl:-rotate-90"
                                     aria-hidden="true"
@@ -208,6 +212,7 @@ const Chat = () => {
 
 
             </div>
+
         </div>
     );
 };
