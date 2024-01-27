@@ -3,15 +3,18 @@ import { useAuth } from "../hooks/AuthProvider";
 import { useNavigate } from "react-router-dom";
 
 const Chat = () => {
+    const apiUrl = import.meta.env.VITE_API_URL;
+    
     const auth = useAuth();
     const navigate = useNavigate();
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(false);
 
+
     useEffect(() => {
         const fetchUser = async () => {
             try {
-                const userResponse = await fetch("http://localhost:8000/users/me/", {
+                const userResponse = await fetch(apiUrl+"/users/me/", {
                     method: "GET",
                     headers: {
                         "Content-Type": "application/json",
