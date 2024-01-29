@@ -34,85 +34,20 @@ from .router.auth import get_current_active_user, get_current_active_user_from_r
 # Load konfigurasi dari file .env
 load_dotenv()
 
-MODEL_PATH = "recsys_models/movielens_model"
-MODEL_NAME = "movielens_deepfm_model"
-
 # Load mapping untuk ID penyedia dari file JSON
 with open("data/movie_id_mappings.json", "r") as json_file:
     movie_id_mappings = json.load(json_file)
 
-# Reset graph TensorFlow yang ada
-tf.compat.v1.reset_default_graph()
-
-# Load informasi data dan model sistem rekomendasi
-data_info = DataInfo.load(MODEL_PATH, model_name=MODEL_NAME)
-model = DeepFM.load(
-    path=MODEL_PATH, model_name=MODEL_NAME, data_info=data_info, manual=True
-)
-
-
 session = Session(engine)
 
 
-# Konversi fungsi rekomendasi menjadi tool terstruktur
-# recsys = StructuredTool.from_function(
-#     func=recommend_top_k,
-#     name="RecSys",
-#     description="Retrieve top k recommended company for a User",
-#     args_schema=RecSysInput,
-#     return_direct=False,
-# )
-
-# List tools yang digunakan
-# tools = [
-#     recsys,
-#     # TODO: Add more tools
-# ]
-
-# Key untuk menyimpan riwayat obrolan dalam memory
-MEMORY_KEY = "chat_history"
-
-# Template prompt untuk percakapan
-# prompt = ChatPromptTemplate.from_messages(
-#     [
-#         (
-#             "system",
-#             "Anda adalah seorang {role} yang sedang berbicara dengan user uid={user_id}.",
-#         ),
-#         MessagesPlaceholder(variable_name=MEMORY_KEY),
-#         ("user", "{input}"),
-#         MessagesPlaceholder(variable_name="agent_scratchpad"),
-#     ]
-# )
-
-# Inisialisasi LLM ChatGPT
-# llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
-
-# Bind tools ke model bahasa
-# llm_with_tools = llm.bind(functions=[format_tool_to_openai_function(t) for t in tools])
-
-# Konfigurasi agen percakapan
-# agent = (
-#     {
-#         "input": lambda x: x["input"],
-#         "agent_scratchpad": lambda x: format_to_openai_function_messages(
-#             x["intermediate_steps"]
-#         ),
-#         "chat_history": lambda x: x["chat_history"],
-#         "user_id": lambda x: x["user_id"],
-#         "role": lambda x: x["role"],
-#     }
-#     | prompt
-#     | llm_with_tools
-#     | OpenAIFunctionsAgentOutputParser()
-# )
-
-# Inisialisasi executor untuk agen
-# agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, user_id=None)
-
-
 class CustomAgentExecutor(RunnableSerializable):
-    user_id: Optional[str]
+    MODEL_PATH: str = "recsys_models/movielens_model"
+    MODEL_NAME: str = "movielens_deepfm_model"
+    MEMORY_KEY: str = "chat_history"
+    user_id: Optional[int]
+    data_info: Any
+    recsys_model: Any
     agent: Any
     recsys: Any
     prompt: Any
@@ -120,12 +55,18 @@ class CustomAgentExecutor(RunnableSerializable):
     tools: Any
     llm_with_tools: Any
 
-
-    class Config:
-        arbitrary_types_allowed = True
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        tf.compat.v1.reset_default_graph()
+
+        self.data_info = DataInfo.load(self.MODEL_PATH, model_name=self.MODEL_NAME)
+        self.recsys_model = DeepFM.load(
+            path=self.MODEL_PATH,
+            model_name=self.MODEL_NAME,
+            data_info=self.data_info,
+            manual=True,
+        )
+
         self.recsys = StructuredTool.from_function(
             func=self._recommend_top_k,
             name="RecSys",
@@ -140,7 +81,7 @@ class CustomAgentExecutor(RunnableSerializable):
                     "system",
                     "Anda adalah seorang {role}",
                 ),
-                MessagesPlaceholder(variable_name=MEMORY_KEY),
+                MessagesPlaceholder(variable_name=self.MEMORY_KEY),
                 ("user", "{input}"),
                 MessagesPlaceholder(variable_name="agent_scratchpad"),
             ]
@@ -167,13 +108,12 @@ class CustomAgentExecutor(RunnableSerializable):
             | OpenAIFunctionsAgentOutputParser()
         )
 
-    # Fungsi untuk merekomendasikan perusahaan
     def _recommend_top_k(self, k: int):
         """Retrieve top k recommended movies for a User"""
-        prediction = model.recommend_user(
+        prediction = self.recsys_model.recommend_user(
             user=self.user_id,
             n_rec=k,
-        )  # TODO: ambil user feature berdasarkan uid
+        )
         movie_ids = prediction[self.user_id]
         movies = [f"{str(mid)}:{movie_id_mappings[str(mid)]}" for mid in movie_ids]
 
@@ -190,7 +130,6 @@ class CustomAgentExecutor(RunnableSerializable):
             agent=self.agent, tools=self.tools, verbose=True
         ).with_config({"run_name": "executor"})
 
-        # input["user_id"] = self.user_id
         return agent_executor.invoke(input, config=config, **kwargs)
 
 
@@ -234,19 +173,13 @@ runnable = CustomAgentExecutor(user_id=None).configurable_fields(
         description="The user ID to use for the retriever.",
     )
 )
+
 add_routes(
     app,
     runnable.with_types(input_type=Input, output_type=Output),
     per_req_config_modifier=per_req_config_modifier,
     enabled_endpoints=["invoke"],
 )
-
-# add_routes(
-#     app,
-#     per_user_chatrec_agent,
-#     per_req_config_modifier=per_req_config_modifier,
-#     enabled_endpoints=["invoke"],
-# )
 
 app.include_router(auth.router)
 
