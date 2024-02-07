@@ -1,9 +1,9 @@
 import json
-from typing import Annotated, Any, Dict, Optional
+from typing import Any, Optional
 
 import tensorflow as tf
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.agents import AgentExecutor
 from langchain.agents.format_scratchpad import format_to_openai_function_messages
@@ -11,13 +11,11 @@ from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-# from .router.auth import per_req_config_modifier
-from langchain.schema.runnable import RunnablePassthrough
+from .router.auth import per_req_config_modifier
 from langchain.tools import StructuredTool
 from langchain.tools.render import format_tool_to_openai_function
 from langchain_core.runnables import (
     ConfigurableField,
-    Runnable,
     RunnableConfig,
     RunnableSerializable,
 )
@@ -27,9 +25,8 @@ from libreco.data import DataInfo
 from sqlmodel import Session
 
 from .database import engine
-from .models import Input, Output, RecSysInput, User
+from .models import Input, Output, RecSysInput
 from .router import auth
-from .router.auth import get_current_active_user, get_current_active_user_from_request
 
 # Load konfigurasi dari file .env
 load_dotenv()
@@ -70,7 +67,8 @@ class CustomAgentExecutor(RunnableSerializable):
         self.recsys = StructuredTool.from_function(
             func=self._recommend_top_k,
             name="RecSys",
-            description="Retrieve top k recommended company for a User",
+            description="""Retrieve top k recommended movies for a user based on historical data, 
+            do not use for any other purpose. Only use when user asks for a reccomendation of films.""",
             args_schema=RecSysInput,
             return_direct=False,
         )
@@ -80,6 +78,10 @@ class CustomAgentExecutor(RunnableSerializable):
                 (
                     "system",
                     "Anda adalah seorang {role}",
+                ),
+                (
+                    "system",
+                    "{instructions}",
                 ),
                 MessagesPlaceholder(variable_name=self.MEMORY_KEY),
                 ("user", "{input}"),
@@ -102,6 +104,7 @@ class CustomAgentExecutor(RunnableSerializable):
                 ),
                 "chat_history": lambda x: x["chat_history"],
                 "role": lambda x: x["role"],
+                "instructions": lambda x: x["instructions"],
             }
             | self.prompt
             | self.llm_with_tools
@@ -117,7 +120,7 @@ class CustomAgentExecutor(RunnableSerializable):
         movie_ids = prediction[self.user_id]
         movies = [f"{str(mid)}:{movie_id_mappings[str(mid)]}" for mid in movie_ids]
 
-        info = f"Rekomendasi film untuk user adalah {', '.join(movies)}"
+        info = f"Rekomendasi film untuk user {self.user_id} berdasarkan data historis adalah {', '.join(movies)}"
         return info
 
     def invoke(
@@ -131,16 +134,6 @@ class CustomAgentExecutor(RunnableSerializable):
         ).with_config({"run_name": "executor"})
 
         return agent_executor.invoke(input, config=config, **kwargs)
-
-
-async def per_req_config_modifier(config: Dict, request: Request) -> Dict:
-    """Modify the config for each request."""
-    user = await get_current_active_user_from_request(request)
-    config["configurable"] = {}
-    # Attention: Make sure that the user ID is over-ridden for each request.
-    # We should not be accepting a user ID from the user in this case!
-    config["configurable"]["user_id"] = user.user_id
-    return config
 
 
 app = FastAPI(

@@ -44,13 +44,13 @@ const Login = () => {
                 <h1 className="text-2xl text-center font-bold pt-3 pb-6 py-6">Sign in to your account</h1>
                 <div className="mb-4">
                     <label htmlFor="username" className="block text-gray-700 text-sm font-bold mb-2">
-                        Username
+                        Movielens User ID (1-943)
                     </label>
                     <input
                         type="text"
                         id="username"
                         name="username"
-                        placeholder="Username"
+                        placeholder="username"
                         className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                         value={input.username}
                         onChange={handleInput}

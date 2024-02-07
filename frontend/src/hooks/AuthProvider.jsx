@@ -15,12 +15,14 @@ const AuthProvider = ({ children }) => {
                 .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(formData[key]))
                 .join('&');
 
+            console.log(formDataEncoded)
+
             const response = await fetch(apiUrl+"/token", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
-                body: formDataEncoded,
+                body: formDataEncoded, 
             });
 
             const res = await response.json();

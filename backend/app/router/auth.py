@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Dict, Union
@@ -20,25 +21,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 router = APIRouter()
 
-
-fake_users_db = {
-    "johndoe": {
-        "username": "johndoe",
-        "user_id": 896,
-        "full_name": "John Doe",
-        "email": "johndoe@example.com",
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        "disabled": False,
-    },
-    "jamesmf": {
-        "username": "jamesmf",
-        "user_id": 196,
-        "full_name": "James Michael Fritz",
-        "email": "jamesmichael0444@gmail.com",
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        "disabled": False,
-    },
-}
+with open("app/router/mock_users_db.json", "r") as f:
+    fake_users_db = json.load(f)
 
 
 def verify_password(plain_password, hashed_password):
@@ -124,14 +108,14 @@ async def get_current_active_user_from_request(request: Request) -> User:
     return user
 
 
-# async def per_req_config_modifier(config: Dict, request: Request) -> Dict:
-#     """Modify the config for each request."""
-#     user = await get_current_active_user_from_request(request)
-#     config["configurable"] = {}
-#     # Attention: Make sure that the user ID is over-ridden for each request.
-#     # We should not be accepting a user ID from the user in this case!
-#     config["configurable"]["user_id"] = user.username
-#     return config
+async def per_req_config_modifier(config: Dict, request: Request) -> Dict:
+    """Modify the config for each request."""
+    user = await get_current_active_user_from_request(request)
+    config["configurable"] = {}
+    # Attention: Make sure that the user ID is over-ridden for each request.
+    # We should not be accepting a user ID from the user in this case!
+    config["configurable"]["user_id"] = user.user_id
+    return config
 
 
 @router.post("/token")

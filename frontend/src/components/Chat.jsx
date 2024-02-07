@@ -42,9 +42,6 @@ const Chat = () => {
     }, [auth.token, navigate]);
 
 
-
-
-
     const handleSubmitMessage = async () => {
         try {
             setLoading(true);
@@ -68,6 +65,7 @@ const Chat = () => {
                     input: {
                         input: inputText,
                         role: role,
+                        instructions: "",
                         chat_history: chatHistory.slice(0, -1)
                     }
                 })
@@ -104,29 +102,35 @@ const Chat = () => {
 
     return (
         <div className="container mx-auto p-8 flex flex-col justify-between h-screen">
-            <div className="flex justify-between items-center bg-teal-500 p-4 rounded-xl">
-                <h1 className="text-2xl font-bold text-white">Welcome, {user?.full_name}!</h1>
-                <button onClick={() => auth.logOut()} className="p-2 bg-teal-700 rounded-lg text-white">
-                    Logout
-                </button>
-            </div>
 
-            <div className="mt-4 mb-4">
-                <label htmlFor="role" className="block text-sm font-medium text-gray-700">
-                    Masukkan Role ChatRec
-                </label>
-                <input
-                    type="text"
-                    id="role"
-                    placeholder="Role"
-                    value={role}
-                    onChange={handleRoleChange}
-                    className="mt-1 p-2 input-field border border-gray-500 rounded-xl"
-                />
-            </div>
+            <div>
+                <div className="flex justify-between items-center bg-teal-500 p-4 rounded-xl">
+                    <h1 className="text-2xl font-bold text-white">Welcome, {user?.full_name}!</h1>
+                    <button onClick={() => auth.logOut()} className="p-2 bg-teal-700 rounded-lg text-white">
+                        Logout
+                    </button>
+                </div>
+                <div className="mt-4 p-4 bg-gray-100 rounded-xl">
+                    <div className="mb-4">
+                        <label htmlFor="role" className="block text-sm font-medium text-gray-700">
+                            Masukkan Role ChatRec
+                        </label>
+                        <input
+                            type="text"
+                            id="role"
+                            placeholder="Role"
+                            value={role}
+                            onChange={handleRoleChange}
+                            className="mt-1 p-2 input-field border border-gray-500 rounded-xl"
+                        />
+                    </div>
+                </div>
+            </div>  
+
+
 
             {chatHistory.length > 0 ? (
-                <div className="bg-white rounded p-8 mb-8">
+                <div className="bg-white rounded p-8 mb-12 h-9/12 overflow-auto">
                     <div className="mt-4">
                         {chatHistory.map((message, index) => (
                             <div
@@ -149,11 +153,11 @@ const Chat = () => {
                 </div>
             )}
 
-            <form className="mt-8 mb-8 fixed inset-x-0 bottom-0 left-0 w-">
+            <form className="mt-8 mb-8 fixed left-0 right-0 bottom-0 mx-auto w-9/12">
                 <label htmlFor="chat" className="sr-only">
                     Your message
                 </label>
-                <div className="flex items-center px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700">
+                <div className="flex items-center px-3 py-2 rounded-lg bg-gray-50">
                     <textarea
                         id="chat"
                         value={loading ? "" : inputText}
@@ -165,12 +169,12 @@ const Chat = () => {
                             }
                         }}
                         rows="1"
-                        className="block mx-4 p-2.5 w-full text-sm text-gray-900 bg-white rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                        className="block mx-4 p-2.5 w-full text-sm text-gray-900 bg-white rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
                         placeholder="Your message..."
                     ></textarea>
 
                     {loading ? (
-                        <div className="inline-flex justify-center p-2 text-blue-600 rounded-full cursor-pointer hover:bg-blue-100 dark:text-blue-500 dark:hover:bg-gray-600">
+                        <div className="inline-flex justify-center p-2 text-blue-600 rounded-full cursor-pointer hover:bg-blue-100">
                             {/* Spinner SVG */}
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
