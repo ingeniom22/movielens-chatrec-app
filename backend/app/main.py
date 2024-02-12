@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Any, Optional
 
 import tensorflow as tf
@@ -9,9 +10,8 @@ from langchain.agents import AgentExecutor
 from langchain.agents.format_scratchpad import format_to_openai_function_messages
 from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser
 from langchain.chat_models import ChatOpenAI
+from langchain.graphs.neo4j_graph import Neo4jGraph
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-
-from .router.auth import per_req_config_modifier
 from langchain.tools import StructuredTool
 from langchain.tools.render import format_tool_to_openai_function
 from langchain_core.runnables import (
@@ -25,8 +25,11 @@ from libreco.data import DataInfo
 from sqlmodel import Session
 
 from .database import engine
-from .models import Input, Output, RecSysInput
+from .models import Input, KGRetrieverInput, Output, RecSysInput
 from .router import auth
+from .router.auth import per_req_config_modifier
+
+from langchain.chains import GraphCypherQAChain
 
 # Load konfigurasi dari file .env
 load_dotenv()
@@ -42,11 +45,22 @@ class CustomAgentExecutor(RunnableSerializable):
     MODEL_PATH: str = "recsys_models/movielens_model"
     MODEL_NAME: str = "movielens_deepfm_model"
     MEMORY_KEY: str = "chat_history"
+    NEO4J_URI: str = os.getenv("NEO4J_URI")
+    NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME")
+    NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD")
     user_id: Optional[int]
+
+    # recsys
     data_info: Any
     recsys_model: Any
-    agent: Any
     recsys: Any
+
+    # knowledge graph
+    neo4j_graph_store: Any
+    kg_retriever: Any
+
+    # agent
+    agent: Any
     prompt: Any
     llm: Any
     tools: Any
@@ -67,9 +81,30 @@ class CustomAgentExecutor(RunnableSerializable):
         self.recsys = StructuredTool.from_function(
             func=self._recommend_top_k,
             name="RecSys",
-            description="""Retrieve top k recommended movies for a user based on historical data, 
-            do not use for any other purpose. Only use when user asks for a reccomendation of films.""",
+            description="""
+            Retrieve top k recommended movies for a user based on historical data, 
+            do not use for any other purpose. Only use when user asks for a reccomendation of films.
+            """,
             args_schema=RecSysInput,
+            return_direct=False,
+        )
+
+        self.neo4j_graph_store = Neo4jGraph(
+            url=self.NEO4J_URI,
+            username=self.NEO4J_USERNAME,
+            password=self.NEO4J_PASSWORD,
+        )
+
+        self.kg_retriever = StructuredTool.from_function(
+            func=self._retrieve_kg,
+            name="KGRetriever",
+            description="""
+            Retrieve knowledge graph from existing database to help answer user questions about movies,
+            Examples: Retrieve movies with similar genre and ratings.
+            Retrieve movies with most ratings.
+            do not user for any other purpose.
+            """,
+            args_schema=KGRetrieverInput,
             return_direct=False,
         )
 
@@ -89,9 +124,9 @@ class CustomAgentExecutor(RunnableSerializable):
             ]
         )
 
-        self.tools = [self.recsys]
-
         self.llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+        self.tools = [self.recsys, self.kg_retriever]
+        
         self.llm_with_tools = self.llm.bind(
             functions=[format_tool_to_openai_function(t) for t in self.tools]
         )
@@ -123,6 +158,15 @@ class CustomAgentExecutor(RunnableSerializable):
         info = f"Rekomendasi film untuk user {self.user_id} berdasarkan data historis adalah {', '.join(movies)}"
         return info
 
+    def _retrieve_kg(self, question: str):
+        """Retrieve data from knowledge graph to answer user question"""
+        chain = GraphCypherQAChain.from_llm(
+            self.llm, graph=self.neo4j_graph_store, verbose=True, return_direct=True
+        )
+
+        result = chain.run(question)
+        return result
+
     def invoke(
         self,
         input: Input,
@@ -150,13 +194,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-
-# add_routes(
-#     app,
-#     agent_executor.with_types(input_type=Input, output_type=Output),
-#     dependencies=[Depends(get_current_active_user)]
-#     # per_req_config_modifier=per_req_config_modifier,
-# )
 
 
 runnable = CustomAgentExecutor(user_id=None).configurable_fields(

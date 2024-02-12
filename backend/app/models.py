@@ -44,6 +44,9 @@ class RecSysInput(BaseModel):
     # uid: int = Field(description="User id")
     k: int = Field(description="Number of movies to be recommended")
 
+class KGRetrieverInput(BaseModel):
+    question: str = Field(description="User questions")
+
 
 class Input(BaseModel):
     input: str
