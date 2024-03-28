@@ -20,12 +20,12 @@ from langchain_core.runnables import (
     RunnableSerializable,
 )
 from langserve import add_routes
-from libreco.algorithms import DeepFM
+from libreco.algorithms import DeepFM, PinSage
 from libreco.data import DataInfo
 from sqlmodel import Session
 
 from .database import engine
-from .models import Input, KGRetrieverInput, Output, RecSysInput
+from .models import Input, KGRetrieverInput, LKPPRecSysInput, MovieRecSysInput, Output
 from .router import auth
 from .router.auth import per_req_config_modifier
 
@@ -38,12 +38,17 @@ load_dotenv()
 with open("data/movie_id_mappings.json", "r") as json_file:
     movie_id_mappings = json.load(json_file)
 
+with open("data/penyedia_id_mappings.json", "r") as json_file:
+    penyedia_id_mappings = json.load(json_file)
+
 session = Session(engine)
 
 
 class CustomAgentExecutor(RunnableSerializable):
-    MODEL_PATH: str = "recsys_models/movielens_model"
-    MODEL_NAME: str = "movielens_deepfm_model"
+    MOVIE_MODEL_PATH: str = "recsys_models/movielens_model"
+    LKPP_MODEL_PATH: str = "recsys_models/lkpp_model"
+    MOVIE_MODEL_NAME: str = "movielens_deepfm_model"
+    LKPP_MODEL_NAME: str = "pinsage_model_lkpp"
     MEMORY_KEY: str = "chat_history"
     NEO4J_URI: str = os.getenv("NEO4J_URI")
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME")
@@ -52,7 +57,8 @@ class CustomAgentExecutor(RunnableSerializable):
 
     # recsys
     data_info: Any
-    recsys_model: Any
+    movie_recsys_model: Any
+    lkpp_recsys_model: Any
     recsys: Any
 
     # knowledge graph
@@ -71,21 +77,39 @@ class CustomAgentExecutor(RunnableSerializable):
         tf.compat.v1.reset_default_graph()
 
         self.data_info = DataInfo.load(self.MODEL_PATH, model_name=self.MODEL_NAME)
-        self.recsys_model = DeepFM.load(
-            path=self.MODEL_PATH,
+        self.movie_recsys_model = DeepFM.load(
+            path=self.MOVIE_MODEL_PATHMODEL_PATH,
             model_name=self.MODEL_NAME,
             data_info=self.data_info,
             manual=True,
         )
 
-        self.recsys = StructuredTool.from_function(
-            func=self._recommend_top_k,
-            name="RecSys",
+        self.lkpp_recsys_model = PinSage.load(
+            path=self.LKPP_MODEL_PATHMODEL_PATH,
+            model_name=self.MODEL_NAME,
+            data_info=self.data_info,
+            manual=True,
+        )
+
+        self.movie_recsys = StructuredTool.from_function(
+            func=self._recommend_top_k_movies,
+            name="MovieRecSys",
             description="""
             Retrieve top k recommended movies for a user based on historical data, 
             do not use for any other purpose. Only use when user asks for a reccomendation of films.
             """,
-            args_schema=RecSysInput,
+            args_schema=MovieRecSysInput,
+            return_direct=False,
+        )
+
+        self.lkpp_recsys = StructuredTool.from_function(
+            func=self._recommend_top_k_companies,
+            name="LKPPRecSys",
+            description="""
+            Retrieve top k recommended company for a user based on historical data, 
+            do not use for any other purpose. Only use when user asks for a reccomendation of companies.
+            """,
+            args_schema=LKPPRecSysInput,
             return_direct=False,
         )
 
@@ -125,8 +149,9 @@ class CustomAgentExecutor(RunnableSerializable):
         )
 
         self.llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
-        self.tools = [self.recsys, self.kg_retriever]
-        
+        self.tools = [self.movie_recsys, self.lkpp_recsys, self.kg_retriever]
+        # self.tools = [self.recsys_lkpp, self.kg_retriever_lkpp, self.kg_retriever_movielens]
+
         self.llm_with_tools = self.llm.bind(
             functions=[format_tool_to_openai_function(t) for t in self.tools]
         )
@@ -146,9 +171,9 @@ class CustomAgentExecutor(RunnableSerializable):
             | OpenAIFunctionsAgentOutputParser()
         )
 
-    def _recommend_top_k(self, k: int):
+    def _recommend_top_k_movies(self, k: int):
         """Retrieve top k recommended movies for a User"""
-        prediction = self.recsys_model.recommend_user(
+        prediction = self.movie_recsys_model.recommend_user(
             user=self.user_id,
             n_rec=k,
         )
@@ -156,6 +181,20 @@ class CustomAgentExecutor(RunnableSerializable):
         movies = [f"{str(mid)}:{movie_id_mappings[str(mid)]}" for mid in movie_ids]
 
         info = f"Rekomendasi film untuk user {self.user_id} berdasarkan data historis adalah {', '.join(movies)}"
+        return info
+
+    def _recommend_top_k_companies(self, k: int):
+        """Retrieve top k recommended companies for a User"""
+        prediction = self.recsys_model.recommend_user(
+            user=self.user_id,
+            n_rec=k,
+        )
+        company_ids = prediction[self.user_id]
+        companies = [
+            f"{str(cid)}:{penyedia_id_mappings[str(cid)]}" for cid in company_ids
+        ]
+
+        info = f"Rekomendasi penyedia untuk user {self.user_id} berdasarkan data historis adalah {', '.join(companies)}"
         return info
 
     def _retrieve_kg(self, question: str):

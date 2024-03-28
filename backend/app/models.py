@@ -40,7 +40,11 @@ class UserInDB(User):
     hashed_password: str
 
 
-class RecSysInput(BaseModel):
+class MovieRecSysInput(BaseModel):
+    # uid: int = Field(description="User id")
+    k: int = Field(description="Number of movies to be recommended")
+
+class LKPPRecSysInput(BaseModel):
     # uid: int = Field(description="User id")
     k: int = Field(description="Number of movies to be recommended")
 
