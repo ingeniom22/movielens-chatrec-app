@@ -1,4 +1,3 @@
-
 import json
 import os
 from typing import Any, Optional
@@ -31,6 +30,8 @@ from .router import auth
 from .router.auth import per_req_config_modifier
 
 from langchain.chains import GraphCypherQAChain
+from langchain.chains.graph_qa.cypher_utils import CypherQueryCorrector, Schema
+
 
 # Load konfigurasi dari file .env
 load_dotenv()
@@ -64,10 +65,11 @@ class CustomAgentExecutor(RunnableSerializable):
     movie_recsys: Any
     lkpp_recsys: Any
 
-
     # knowledge graph
     neo4j_graph_store: Any
     kg_retriever: Any
+    corrector_schema: Any
+    cypher_validation: Any
 
     # agent
     agent: Any
@@ -80,8 +82,12 @@ class CustomAgentExecutor(RunnableSerializable):
         super().__init__(**kwargs)
         tf.compat.v1.reset_default_graph()
 
-        self.movie_data_info = DataInfo.load(self.MOVIE_MODEL_PATH, model_name=self.MOVIE_MODEL_NAME)
-        self.lkpp_data_info = DataInfo.load(self.LKPP_MODEL_PATH, model_name=self.LKPP_MODEL_NAME)
+        self.movie_data_info = DataInfo.load(
+            self.MOVIE_MODEL_PATH, model_name=self.MOVIE_MODEL_NAME
+        )
+        self.lkpp_data_info = DataInfo.load(
+            self.LKPP_MODEL_PATH, model_name=self.LKPP_MODEL_NAME
+        )
 
         self.movie_recsys_model = DeepFM.load(
             path=self.MOVIE_MODEL_PATH,
@@ -138,6 +144,13 @@ class CustomAgentExecutor(RunnableSerializable):
             return_direct=False,
         )
 
+        self.corrector_schema = [
+            Schema(el["start"], el["type"], el["end"])
+            for el in self.neo4j_graph_store.structured_schema.get("relationships")
+        ]
+
+        self.cypher_validation = CypherQueryCorrector(self.corrector_schema)
+
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -155,10 +168,7 @@ class CustomAgentExecutor(RunnableSerializable):
         )
 
         self.llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
-        self.tools = [self.movie_recsys,
-		      self.lkpp_recsys, 
-			self.kg_retriever
-			]
+        self.tools = [self.movie_recsys, self.lkpp_recsys, self.kg_retriever]
         # self.tools = [self.recsys_lkpp, self.kg_retriever_lkpp, self.kg_retriever_movielens]
 
         self.llm_with_tools = self.llm.bind(
@@ -208,8 +218,8 @@ class CustomAgentExecutor(RunnableSerializable):
 
     def _retrieve_kg(self, question: str):
         """Retrieve data from knowledge graph to answer user question"""
-        chain = GraphCypherQAChain.from_llm(
-            self.llm, graph=self.neo4j_graph_store, verbose=True, return_direct=True
+        chain = GraphCypherQAChain(cypher_query_corrector=self.cypher_validation).from_llm(
+            self.llm, graph=self.neo4j_graph_store, verbose=True, return_direct=True, validate_cypher=True
         )
 
         result = chain.run(question)
