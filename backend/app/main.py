@@ -218,7 +218,7 @@ class CustomAgentExecutor(RunnableSerializable):
 
     def _retrieve_kg(self, question: str):
         """Retrieve data from knowledge graph to answer user question"""
-        chain = GraphCypherQAChain(cypher_query_corrector=self.cypher_validation).from_llm(
+        chain = GraphCypherQAChain.from_llm(
             self.llm, graph=self.neo4j_graph_store, verbose=True, return_direct=True, validate_cypher=True
         )
 
