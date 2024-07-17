@@ -1,3 +1,4 @@
+
 import json
 import os
 from typing import Any, Optional
@@ -56,10 +57,13 @@ class CustomAgentExecutor(RunnableSerializable):
     user_id: Optional[int]
 
     # recsys
-    data_info: Any
+    movie_data_info: Any
     movie_recsys_model: Any
+    lkpp_data_info: Any
     lkpp_recsys_model: Any
-    recsys: Any
+    movie_recsys: Any
+    lkpp_recsys: Any
+
 
     # knowledge graph
     neo4j_graph_store: Any
@@ -76,18 +80,20 @@ class CustomAgentExecutor(RunnableSerializable):
         super().__init__(**kwargs)
         tf.compat.v1.reset_default_graph()
 
-        self.data_info = DataInfo.load(self.MODEL_PATH, model_name=self.MODEL_NAME)
+        self.movie_data_info = DataInfo.load(self.MOVIE_MODEL_PATH, model_name=self.MOVIE_MODEL_NAME)
+        self.lkpp_data_info = DataInfo.load(self.LKPP_MODEL_PATH, model_name=self.LKPP_MODEL_NAME)
+
         self.movie_recsys_model = DeepFM.load(
-            path=self.MOVIE_MODEL_PATHMODEL_PATH,
-            model_name=self.MODEL_NAME,
-            data_info=self.data_info,
+            path=self.MOVIE_MODEL_PATH,
+            model_name=self.MOVIE_MODEL_NAME,
+            data_info=self.movie_data_info,
             manual=True,
         )
 
         self.lkpp_recsys_model = PinSage.load(
-            path=self.LKPP_MODEL_PATHMODEL_PATH,
-            model_name=self.MODEL_NAME,
-            data_info=self.data_info,
+            path=self.LKPP_MODEL_PATH,
+            model_name=self.LKPP_MODEL_NAME,
+            data_info=self.lkpp_data_info,
             manual=True,
         )
 
@@ -123,8 +129,8 @@ class CustomAgentExecutor(RunnableSerializable):
             func=self._retrieve_kg,
             name="KGRetriever",
             description="""
-            Retrieve knowledge graph from existing database to help answer user questions about movies,
-            Examples: Retrieve movies with similar genre and ratings.
+            Retrieve knowledge graph from existing database to help answer user questions about movies, or company
+            Examples: Retrieve movies with similar genre and ratings. Retrieve company with hghest average ratings.
             Retrieve movies with most ratings.
             do not user for any other purpose.
             """,
@@ -149,7 +155,10 @@ class CustomAgentExecutor(RunnableSerializable):
         )
 
         self.llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
-        self.tools = [self.movie_recsys, self.lkpp_recsys, self.kg_retriever]
+        self.tools = [self.movie_recsys,
+		      self.lkpp_recsys, 
+			self.kg_retriever
+			]
         # self.tools = [self.recsys_lkpp, self.kg_retriever_lkpp, self.kg_retriever_movielens]
 
         self.llm_with_tools = self.llm.bind(
@@ -185,7 +194,7 @@ class CustomAgentExecutor(RunnableSerializable):
 
     def _recommend_top_k_companies(self, k: int):
         """Retrieve top k recommended companies for a User"""
-        prediction = self.recsys_model.recommend_user(
+        prediction = self.lkpp_recsys_model.recommend_user(
             user=self.user_id,
             n_rec=k,
         )
