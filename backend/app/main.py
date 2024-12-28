@@ -1,35 +1,35 @@
 import json
-from typing import Annotated, Any, Dict, Optional
+import os
+from typing import Any, Optional
 
 import tensorflow as tf
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.agents import AgentExecutor
 from langchain.agents.format_scratchpad import format_to_openai_function_messages
 from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser
 from langchain.chat_models import ChatOpenAI
+from langchain.graphs.neo4j_graph import Neo4jGraph
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-
-# from .router.auth import per_req_config_modifier
-from langchain.schema.runnable import RunnablePassthrough
 from langchain.tools import StructuredTool
 from langchain.tools.render import format_tool_to_openai_function
 from langchain_core.runnables import (
     ConfigurableField,
-    Runnable,
     RunnableConfig,
     RunnableSerializable,
 )
 from langserve import add_routes
-from libreco.algorithms import DeepFM
+from libreco.algorithms import DeepFM, PinSage
 from libreco.data import DataInfo
 from sqlmodel import Session
 
 from .database import engine
-from .models import Input, Output, RecSysInput, User
+from .models import Input, KGRetrieverInput, LKPPRecSysInput, MovieRecSysInput, Output
 from .router import auth
-from .router.auth import get_current_active_user, get_current_active_user_from_request
+from .router.auth import per_req_config_modifier
+
+from langchain.chains import GraphCypherQAChain
 
 # Load konfigurasi dari file .env
 load_dotenv()
@@ -38,18 +38,35 @@ load_dotenv()
 with open("data/movie_id_mappings.json", "r") as json_file:
     movie_id_mappings = json.load(json_file)
 
+with open("data/penyedia_id_mappings.json", "r") as json_file:
+    penyedia_id_mappings = json.load(json_file)
+
 session = Session(engine)
 
 
 class CustomAgentExecutor(RunnableSerializable):
-    MODEL_PATH: str = "recsys_models/movielens_model"
-    MODEL_NAME: str = "movielens_deepfm_model"
+    MOVIE_MODEL_PATH: str = "recsys_models/movielens_model"
+    LKPP_MODEL_PATH: str = "recsys_models/lkpp_model"
+    MOVIE_MODEL_NAME: str = "movielens_deepfm_model"
+    LKPP_MODEL_NAME: str = "pinsage_model_lkpp"
     MEMORY_KEY: str = "chat_history"
+    NEO4J_URI: str = os.getenv("NEO4J_URI")
+    NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME")
+    NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD")
     user_id: Optional[int]
+
+    # recsys
     data_info: Any
-    recsys_model: Any
-    agent: Any
+    movie_recsys_model: Any
+    lkpp_recsys_model: Any
     recsys: Any
+
+    # knowledge graph
+    neo4j_graph_store: Any
+    kg_retriever: Any
+
+    # agent
+    agent: Any
     prompt: Any
     llm: Any
     tools: Any
@@ -60,18 +77,58 @@ class CustomAgentExecutor(RunnableSerializable):
         tf.compat.v1.reset_default_graph()
 
         self.data_info = DataInfo.load(self.MODEL_PATH, model_name=self.MODEL_NAME)
-        self.recsys_model = DeepFM.load(
-            path=self.MODEL_PATH,
+        self.movie_recsys_model = DeepFM.load(
+            path=self.MOVIE_MODEL_PATHMODEL_PATH,
             model_name=self.MODEL_NAME,
             data_info=self.data_info,
             manual=True,
         )
 
-        self.recsys = StructuredTool.from_function(
-            func=self._recommend_top_k,
-            name="RecSys",
-            description="Retrieve top k recommended company for a User",
-            args_schema=RecSysInput,
+        self.lkpp_recsys_model = PinSage.load(
+            path=self.LKPP_MODEL_PATHMODEL_PATH,
+            model_name=self.MODEL_NAME,
+            data_info=self.data_info,
+            manual=True,
+        )
+
+        self.movie_recsys = StructuredTool.from_function(
+            func=self._recommend_top_k_movies,
+            name="MovieRecSys",
+            description="""
+            Retrieve top k recommended movies for a user based on historical data, 
+            do not use for any other purpose. Only use when user asks for a reccomendation of films.
+            """,
+            args_schema=MovieRecSysInput,
+            return_direct=False,
+        )
+
+        self.lkpp_recsys = StructuredTool.from_function(
+            func=self._recommend_top_k_companies,
+            name="LKPPRecSys",
+            description="""
+            Retrieve top k recommended company for a user based on historical data, 
+            do not use for any other purpose. Only use when user asks for a reccomendation of companies.
+            """,
+            args_schema=LKPPRecSysInput,
+            return_direct=False,
+        )
+
+        self.neo4j_graph_store = Neo4jGraph(
+            url=self.NEO4J_URI,
+            username=self.NEO4J_USERNAME,
+            password=self.NEO4J_PASSWORD,
+        )
+
+        self.kg_retriever = StructuredTool.from_function(
+            func=self._retrieve_kg,
+            name="KGRetriever",
+            description="""
+            Retrieve knowledge graph from existing database to help answer user questions about movies,
+            Examples: Retrieve movies with similar genre and ratings.
+            Retrieve movies with most ratings.
+            do not user for any other purpose.
+            """,
+            args_schema=KGRetrieverInput,
             return_direct=False,
         )
 
@@ -81,15 +138,20 @@ class CustomAgentExecutor(RunnableSerializable):
                     "system",
                     "Anda adalah seorang {role}",
                 ),
+                (
+                    "system",
+                    "{instructions}",
+                ),
                 MessagesPlaceholder(variable_name=self.MEMORY_KEY),
                 ("user", "{input}"),
                 MessagesPlaceholder(variable_name="agent_scratchpad"),
             ]
         )
 
-        self.tools = [self.recsys]
-
         self.llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+        self.tools = [self.movie_recsys, self.lkpp_recsys, self.kg_retriever]
+        # self.tools = [self.recsys_lkpp, self.kg_retriever_lkpp, self.kg_retriever_movielens]
+
         self.llm_with_tools = self.llm.bind(
             functions=[format_tool_to_openai_function(t) for t in self.tools]
         )
@@ -102,23 +164,47 @@ class CustomAgentExecutor(RunnableSerializable):
                 ),
                 "chat_history": lambda x: x["chat_history"],
                 "role": lambda x: x["role"],
+                "instructions": lambda x: x["instructions"],
             }
             | self.prompt
             | self.llm_with_tools
             | OpenAIFunctionsAgentOutputParser()
         )
 
-    def _recommend_top_k(self, k: int):
+    def _recommend_top_k_movies(self, k: int):
         """Retrieve top k recommended movies for a User"""
-        prediction = self.recsys_model.recommend_user(
+        prediction = self.movie_recsys_model.recommend_user(
             user=self.user_id,
             n_rec=k,
         )
         movie_ids = prediction[self.user_id]
         movies = [f"{str(mid)}:{movie_id_mappings[str(mid)]}" for mid in movie_ids]
 
-        info = f"Rekomendasi film untuk user adalah {', '.join(movies)}"
+        info = f"Rekomendasi film untuk user {self.user_id} berdasarkan data historis adalah {', '.join(movies)}"
         return info
+
+    def _recommend_top_k_companies(self, k: int):
+        """Retrieve top k recommended companies for a User"""
+        prediction = self.recsys_model.recommend_user(
+            user=self.user_id,
+            n_rec=k,
+        )
+        company_ids = prediction[self.user_id]
+        companies = [
+            f"{str(cid)}:{penyedia_id_mappings[str(cid)]}" for cid in company_ids
+        ]
+
+        info = f"Rekomendasi penyedia untuk user {self.user_id} berdasarkan data historis adalah {', '.join(companies)}"
+        return info
+
+    def _retrieve_kg(self, question: str):
+        """Retrieve data from knowledge graph to answer user question"""
+        chain = GraphCypherQAChain.from_llm(
+            self.llm, graph=self.neo4j_graph_store, verbose=True, return_direct=True
+        )
+
+        result = chain.run(question)
+        return result
 
     def invoke(
         self,
@@ -131,16 +217,6 @@ class CustomAgentExecutor(RunnableSerializable):
         ).with_config({"run_name": "executor"})
 
         return agent_executor.invoke(input, config=config, **kwargs)
-
-
-async def per_req_config_modifier(config: Dict, request: Request) -> Dict:
-    """Modify the config for each request."""
-    user = await get_current_active_user_from_request(request)
-    config["configurable"] = {}
-    # Attention: Make sure that the user ID is over-ridden for each request.
-    # We should not be accepting a user ID from the user in this case!
-    config["configurable"]["user_id"] = user.user_id
-    return config
 
 
 app = FastAPI(
@@ -157,13 +233,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-
-# add_routes(
-#     app,
-#     agent_executor.with_types(input_type=Input, output_type=Output),
-#     dependencies=[Depends(get_current_active_user)]
-#     # per_req_config_modifier=per_req_config_modifier,
-# )
 
 
 runnable = CustomAgentExecutor(user_id=None).configurable_fields(

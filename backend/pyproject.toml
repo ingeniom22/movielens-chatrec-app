@@ -20,7 +20,11 @@ openai = "^1.10.0"
 pydantic = "1.10.13"
 python-dotenv = "^1.0.1"
 sqlmodel = "^0.0.14"
+neo4j = "^5.17.0"
 
+
+[tool.poetry.group.dev.dependencies]
+faker = "^23.0.0"
 
 [build-system]
 requires = ["poetry-core"]

@@ -13,8 +13,24 @@ class TokenData(BaseModel):
 
 
 class User(BaseModel):
+    """
+    "user_id": 1,
+    "age": 24,
+    "gender": "M",
+    "occupation": "technician",
+    "zip_code": "85711",
+    "username": "Margy",
+    "full_name": "Catherine Oliver",
+    "email": "njimenez@example.com",
+    "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
+    "disabled": false
+    """
     username: str
     user_id : int
+    age: int
+    gender: str
+    occupation: str
+    zip_code: str
     email: Union[str, None] = None
     full_name: Union[str, None] = None
     disabled: Union[bool, None] = None
@@ -24,15 +40,23 @@ class UserInDB(User):
     hashed_password: str
 
 
-class RecSysInput(BaseModel):
+class MovieRecSysInput(BaseModel):
     # uid: int = Field(description="User id")
     k: int = Field(description="Number of movies to be recommended")
+
+class LKPPRecSysInput(BaseModel):
+    # uid: int = Field(description="User id")
+    k: int = Field(description="Number of movies to be recommended")
+
+class KGRetrieverInput(BaseModel):
+    question: str = Field(description="User questions")
 
 
 class Input(BaseModel):
     input: str
     role: str = Field(default="Pakar Film")
-    chat_history: List[Union[HumanMessage, AIMessage, FunctionMessage]]
+    instructions: str = Field(default="")
+    chat_history: List[Union[HumanMessage, AIMessage]]
 
 
 class Output(BaseModel):

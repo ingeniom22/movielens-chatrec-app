@@ -4,6 +4,7 @@ env/
 sample_movielens_merged.csv
 ml-100k-merged.csv
 __pycache__/
+letsencrypt/
 
 
 .vs/
