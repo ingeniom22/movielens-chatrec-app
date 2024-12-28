@@ -30,6 +30,8 @@ from .router import auth
 from .router.auth import per_req_config_modifier
 
 from langchain.chains import GraphCypherQAChain
+from langchain.chains.graph_qa.cypher_utils import CypherQueryCorrector, Schema
+
 
 # Load konfigurasi dari file .env
 load_dotenv()
@@ -56,14 +58,18 @@ class CustomAgentExecutor(RunnableSerializable):
     user_id: Optional[int]
 
     # recsys
-    data_info: Any
+    movie_data_info: Any
     movie_recsys_model: Any
+    lkpp_data_info: Any
     lkpp_recsys_model: Any
-    recsys: Any
+    movie_recsys: Any
+    lkpp_recsys: Any
 
     # knowledge graph
     neo4j_graph_store: Any
     kg_retriever: Any
+    corrector_schema: Any
+    cypher_validation: Any
 
     # agent
     agent: Any
@@ -76,18 +82,24 @@ class CustomAgentExecutor(RunnableSerializable):
         super().__init__(**kwargs)
         tf.compat.v1.reset_default_graph()
 
-        self.data_info = DataInfo.load(self.MODEL_PATH, model_name=self.MODEL_NAME)
+        self.movie_data_info = DataInfo.load(
+            self.MOVIE_MODEL_PATH, model_name=self.MOVIE_MODEL_NAME
+        )
+        self.lkpp_data_info = DataInfo.load(
+            self.LKPP_MODEL_PATH, model_name=self.LKPP_MODEL_NAME
+        )
+
         self.movie_recsys_model = DeepFM.load(
-            path=self.MOVIE_MODEL_PATHMODEL_PATH,
-            model_name=self.MODEL_NAME,
-            data_info=self.data_info,
+            path=self.MOVIE_MODEL_PATH,
+            model_name=self.MOVIE_MODEL_NAME,
+            data_info=self.movie_data_info,
             manual=True,
         )
 
         self.lkpp_recsys_model = PinSage.load(
-            path=self.LKPP_MODEL_PATHMODEL_PATH,
-            model_name=self.MODEL_NAME,
-            data_info=self.data_info,
+            path=self.LKPP_MODEL_PATH,
+            model_name=self.LKPP_MODEL_NAME,
+            data_info=self.lkpp_data_info,
             manual=True,
         )
 
@@ -123,14 +135,21 @@ class CustomAgentExecutor(RunnableSerializable):
             func=self._retrieve_kg,
             name="KGRetriever",
             description="""
-            Retrieve knowledge graph from existing database to help answer user questions about movies,
-            Examples: Retrieve movies with similar genre and ratings.
+            Retrieve knowledge graph from existing database to help answer user questions about movies, or company
+            Examples: Retrieve movies with similar genre and ratings. Retrieve company with hghest average ratings.
             Retrieve movies with most ratings.
             do not user for any other purpose.
             """,
             args_schema=KGRetrieverInput,
             return_direct=False,
         )
+
+        self.corrector_schema = [
+            Schema(el["start"], el["type"], el["end"])
+            for el in self.neo4j_graph_store.structured_schema.get("relationships")
+        ]
+
+        self.cypher_validation = CypherQueryCorrector(self.corrector_schema)
 
         self.prompt = ChatPromptTemplate.from_messages(
             [
@@ -185,7 +204,7 @@ class CustomAgentExecutor(RunnableSerializable):
 
     def _recommend_top_k_companies(self, k: int):
         """Retrieve top k recommended companies for a User"""
-        prediction = self.recsys_model.recommend_user(
+        prediction = self.lkpp_recsys_model.recommend_user(
             user=self.user_id,
             n_rec=k,
         )
@@ -200,7 +219,7 @@ class CustomAgentExecutor(RunnableSerializable):
     def _retrieve_kg(self, question: str):
         """Retrieve data from knowledge graph to answer user question"""
         chain = GraphCypherQAChain.from_llm(
-            self.llm, graph=self.neo4j_graph_store, verbose=True, return_direct=True
+            self.llm, graph=self.neo4j_graph_store, verbose=True, return_direct=True, validate_cypher=True
         )
 
         result = chain.run(question)
